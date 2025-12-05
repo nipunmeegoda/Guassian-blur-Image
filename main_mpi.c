@@ -95,8 +95,8 @@ int main(int argc, char *argv[])
 
     if (rank == 0) {
         writePGM(argv[2], fullImage, width, height, maxVal);
-        printf("MPI Blur Completed in %.6f seconds. Output saved to %s\n",
-               endTime - startTime, argv[2]);
+        printf("MPI Blur Completed in %.6f seconds.",
+               endTime - startTime);
     }
 
     free(bufferA);
