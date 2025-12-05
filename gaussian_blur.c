@@ -1,8 +1,6 @@
 #include "gaussian_blur.h"
 
-// ------------------------------------------------------
-// Read PGM (supports P2 and P5 formats)
-// ------------------------------------------------------
+
 unsigned char* readPGM(const char *filename, int *width, int *height, int *maxVal) {
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
@@ -19,8 +17,6 @@ unsigned char* readPGM(const char *filename, int *width, int *height, int *maxVa
     }
 
     int c = fgetc(fp);
-
-    // Skip comment lines
     while (c == '#') {
         while (fgetc(fp) != '\n') { }
         c = fgetc(fp);
@@ -45,9 +41,6 @@ unsigned char* readPGM(const char *filename, int *width, int *height, int *maxVa
     return image;
 }
 
-// ------------------------------------------------------
-// Save PGM (always ASCII P2)
-// ------------------------------------------------------
 void writePGM(const char *filename, unsigned char *image, int width, int height, int maxVal) {
     FILE *fp = fopen(filename, "w");
 
@@ -62,9 +55,6 @@ void writePGM(const char *filename, unsigned char *image, int width, int height,
     fclose(fp);
 }
 
-// ------------------------------------------------------
-// Single-pass Gaussian Blur
-// ------------------------------------------------------
 void gaussianBlurWithScratch(const unsigned char *input, unsigned char *output,
                              int width, int height, unsigned short *scratch)
 {
@@ -72,7 +62,7 @@ void gaussianBlurWithScratch(const unsigned char *input, unsigned char *output,
         return;
     }
 
-    const int lastX = width - 1;
+    const int lastX = width - 1;    
     const int lastY = height - 1;
     const size_t rowStride = (size_t)width;
 
@@ -95,7 +85,6 @@ void gaussianBlurWithScratch(const unsigned char *input, unsigned char *output,
         }
     }
 
-    // Vertical pass: convolve intermediate buffer with [1 2 1] and normalize
     #pragma omp parallel for schedule(static)
     for (int y = 0; y < height; y++) {
         const int topIdx = (y == 0) ? 0 : y - 1;
@@ -112,11 +101,11 @@ void gaussianBlurWithScratch(const unsigned char *input, unsigned char *output,
                 midRow[x]    * GAUSSIAN_WEIGHTS[1] +
                 bottomRow[x] * GAUSSIAN_WEIGHTS[2];
 
-            // Add GAUSS_SCALE/2 for rounding before normalization
             outRow[x] = (unsigned char)((acc + (GAUSS_SCALE >> 1)) / GAUSS_SCALE);
         }
     }
 }
+
 
 void gaussianBlur(unsigned char *input, unsigned char *output, int width, int height) {
     const size_t scratchSize = (size_t)width * height;
@@ -131,9 +120,7 @@ void gaussianBlur(unsigned char *input, unsigned char *output, int width, int he
     free(scratch);
 }
 
-// ------------------------------------------------------
-// Multi-pass stronger Gaussian Blur
-// ------------------------------------------------------
+
 void gaussianBlurMultiple(unsigned char *input, unsigned char *output,
                           int width, int height, int passes)
 {
@@ -160,7 +147,6 @@ void gaussianBlurMultiple(unsigned char *input, unsigned char *output,
         next = tmp;
     }
 
-    // Ensure the result resides in the original input buffer for callers
     if (current != firstBuffer && pixelCount > 0) {
         memcpy(firstBuffer, current, pixelCount);
     }
