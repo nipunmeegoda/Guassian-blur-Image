@@ -1,24 +1,14 @@
 #include "gaussian_blur.h"
 
-
 unsigned char* readPGM(const char *filename, int *width, int *height, int *maxVal) {
     FILE *fp = fopen(filename, "rb");
-    if (!fp) {
-        printf("Error: Cannot open %s\n", filename);
-        exit(1);
-    }
 
     char magic[3];
     fscanf(fp, "%2s", magic);
 
-    if (strcmp(magic, "P2") != 0 && strcmp(magic, "P5") != 0) {
-        printf("Error: Unsupported PGM format! Must be P2 or P5.\n");
-        exit(1);
-    }
-
     int c = fgetc(fp);
     while (c == '#') {
-        while (fgetc(fp) != '\n') { }
+        while (fgetc(fp) != '\n') {}
         c = fgetc(fp);
     }
     ungetc(c, fp);
@@ -30,13 +20,7 @@ unsigned char* readPGM(const char *filename, int *width, int *height, int *maxVa
     int size = (*width) * (*height);
     unsigned char *image = malloc(size);
 
-    if (strcmp(magic, "P5") == 0) {
-        fread(image, 1, size, fp);
-    } else {
-        for (int i = 0; i < size; i++)
-            fscanf(fp, "%hhu", &image[i]);
-    }
-
+    fread(image, 1, size, fp);
     fclose(fp);
     return image;
 }
@@ -44,13 +28,9 @@ unsigned char* readPGM(const char *filename, int *width, int *height, int *maxVa
 void writePGM(const char *filename, unsigned char *image, int width, int height, int maxVal) {
     FILE *fp = fopen(filename, "w");
 
-    fprintf(fp, "P2\n");
-    fprintf(fp, "%d %d\n", width, height);
-    fprintf(fp, "%d\n", maxVal);
-
-    for (int i = 0; i < width * height; i++) {
+    fprintf(fp, "P2\n%d %d\n%d\n", width, height, maxVal);
+    for (int i = 0; i < width * height; i++)
         fprintf(fp, "%d ", image[i]);
-    }
 
     fclose(fp);
 }
@@ -58,98 +38,68 @@ void writePGM(const char *filename, unsigned char *image, int width, int height,
 void gaussianBlurWithScratch(const unsigned char *input, unsigned char *output,
                              int width, int height, unsigned short *scratch)
 {
-    if (width <= 0 || height <= 0 || scratch == NULL || input == NULL || output == NULL) {
-        return;
-    }
-
-    const int lastX = width - 1;    
+    const int lastX = width - 1;
     const int lastY = height - 1;
     const size_t rowStride = (size_t)width;
 
-    // Horizontal pass: convolve each row with [1 2 1]
     #pragma omp parallel for schedule(static)
     for (int y = 0; y < height; y++) {
         const unsigned char *row = input + y * rowStride;
         unsigned short *tmpRow = scratch + y * rowStride;
 
         for (int x = 0; x < width; x++) {
-            const int leftIdx = (x == 0) ? 0 : x - 1;
-            const int rightIdx = (x == lastX) ? lastX : x + 1;
-
-            const unsigned int acc =
-                row[leftIdx] * GAUSSIAN_WEIGHTS[0] +
-                row[x]       * GAUSSIAN_WEIGHTS[1] +
-                row[rightIdx]* GAUSSIAN_WEIGHTS[2];
-
-            tmpRow[x] = (unsigned short)acc;
+            int l = (x == 0) ? 0 : x - 1;
+            int r = (x == lastX) ? lastX : x + 1;
+            tmpRow[x] =
+                row[l] * GAUSSIAN_WEIGHTS[0] +
+                row[x] * GAUSSIAN_WEIGHTS[1] +
+                row[r] * GAUSSIAN_WEIGHTS[2];
         }
     }
 
     #pragma omp parallel for schedule(static)
     for (int y = 0; y < height; y++) {
-        const int topIdx = (y == 0) ? 0 : y - 1;
-        const int bottomIdx = (y == lastY) ? lastY : y + 1;
+        int t = (y == 0) ? 0 : y - 1;
+        int b = (y == lastY) ? lastY : y + 1;
 
-        const unsigned short *topRow = scratch + topIdx * rowStride;
-        const unsigned short *midRow = scratch + y * rowStride;
-        const unsigned short *bottomRow = scratch + bottomIdx * rowStride;
-        unsigned char *outRow = output + y * rowStride;
+        const unsigned short *top = scratch + t * rowStride;
+        const unsigned short *mid = scratch + y * rowStride;
+        const unsigned short *bot = scratch + b * rowStride;
+        unsigned char *out = output + y * rowStride;
 
         for (int x = 0; x < width; x++) {
-            const unsigned int acc =
-                topRow[x]    * GAUSSIAN_WEIGHTS[0] +
-                midRow[x]    * GAUSSIAN_WEIGHTS[1] +
-                bottomRow[x] * GAUSSIAN_WEIGHTS[2];
+            unsigned int acc =
+                top[x] * GAUSSIAN_WEIGHTS[0] +
+                mid[x] * GAUSSIAN_WEIGHTS[1] +
+                bot[x] * GAUSSIAN_WEIGHTS[2];
 
-            outRow[x] = (unsigned char)((acc + (GAUSS_SCALE >> 1)) / GAUSS_SCALE);
+            out[x] = (unsigned char)((acc + (GAUSS_SCALE >> 1)) / GAUSS_SCALE);
         }
     }
 }
 
-
 void gaussianBlur(unsigned char *input, unsigned char *output, int width, int height) {
-    const size_t scratchSize = (size_t)width * height;
-    unsigned short *scratch = NULL;
-
-    if (scratchSize > 0) {
-        scratch = (unsigned short *)malloc(scratchSize * sizeof(unsigned short));
-    }
-
+    unsigned short *scratch = malloc((size_t)width * height * sizeof(unsigned short));
     gaussianBlurWithScratch(input, output, width, height, scratch);
-
     free(scratch);
 }
-
 
 void gaussianBlurMultiple(unsigned char *input, unsigned char *output,
                           int width, int height, int passes)
 {
-    if (passes <= 0) {
-        return;
-    }
-
-    const size_t pixelCount = (size_t)width * height;
-    unsigned short *scratch = NULL;
-
-    if (pixelCount > 0) {
-        scratch = (unsigned short *)malloc(pixelCount * sizeof(unsigned short));
-    }
+    size_t count = (size_t)width * height;
+    unsigned short *scratch = malloc(count * sizeof(unsigned short));
 
     unsigned char *current = input;
     unsigned char *next = output;
-    unsigned char *const firstBuffer = input;
 
     for (int i = 0; i < passes; i++) {
         gaussianBlurWithScratch(current, next, width, height, scratch);
-
-        unsigned char *tmp = current;
-        current = next;
-        next = tmp;
+        unsigned char *tmp = current; current = next; next = tmp;
     }
 
-    if (current != firstBuffer && pixelCount > 0) {
-        memcpy(firstBuffer, current, pixelCount);
-    }
+    if (current != input)
+        memcpy(input, current, count);
 
     free(scratch);
 }
