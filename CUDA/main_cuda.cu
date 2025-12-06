@@ -5,12 +5,15 @@
 
 #define CHECK_CUDA(call) do { if ((call) != cudaSuccess) exit(1); } while (0)
 
+
+// 3x3 Gaussian kernel
 __constant__ float d_kernel[9] = {
     1.0f/16, 2.0f/16, 1.0f/16,
     2.0f/16, 4.0f/16, 2.0f/16,
     1.0f/16, 2.0f/16, 1.0f/16
 };
 
+// Read a binary PGM
 unsigned char* readPGM(const char* filename, int* w, int* h, int* maxVal) {
     FILE* fp = fopen(filename, "rb");
     if (!fp) exit(1);
@@ -36,6 +39,7 @@ unsigned char* readPGM(const char* filename, int* w, int* h, int* maxVal) {
     return img;
 }
 
+// Write a binary PGM
 void writePGM(const char* filename, const unsigned char* img, int w, int h, int maxVal) {
     FILE* fp = fopen(filename, "wb");
     if (!fp) exit(1);
@@ -44,19 +48,22 @@ void writePGM(const char* filename, const unsigned char* img, int w, int h, int 
     fclose(fp);
 }
 
+// CUDA kernel to apply a 3x3 Gaussian blur
 __global__ void gaussianBlurKernel(const unsigned char* in,
                                    unsigned char* out,
                                    int w, int h) {
+    // Compute the (x, y) coordinates of the pixel
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= w || y >= h) return;
 
     float sum = 0.0f;
+    // Loop over the 3x3 neighborhood 
     for (int ky = -1; ky <= 1; ky++) {
         for (int kx = -1; kx <= 1; kx++) {
             int px = x + kx;
             int py = y + ky;
-            if (px < 0) px = 0;
+            if (px < 0) px = 0; // Clamp coordinates to image boundaries
             if (px >= w) px = w - 1;
             if (py < 0) py = 0;
             if (py >= h) py = h - 1;
@@ -71,12 +78,13 @@ __global__ void gaussianBlurKernel(const unsigned char* in,
     if (sum < 0.0f)   sum = 0.0f;
     if (sum > 255.0f) sum = 255.0f;
 
+    // Store result back to output image at (x, y)
     size_t outIdx = (size_t)y * (size_t)w + (size_t)x;
     out[outIdx] = (unsigned char)(sum + 0.5f);
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 3) return 1;
+    if (argc < 3) return 1; // Usage: ./blur_cuda input.pgm output.pgm [blockSize] [passes]
 
     const char* inFile  = argv[1];
     const char* outFile = argv[2];
@@ -99,6 +107,8 @@ int main(int argc, char* argv[]) {
     CHECK_CUDA(cudaMalloc(&d_out, size));
     CHECK_CUDA(cudaMemcpy(d_in, h_in, size, cudaMemcpyHostToDevice));
 
+
+    // Each block is blockSize x blockSize threads.
     dim3 block(blockSize, blockSize);
     dim3 grid((w + block.x - 1) / block.x, (h + block.y - 1) / block.y);
 
@@ -110,6 +120,9 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < passes; i++) {
         gaussianBlurKernel<<<grid, block>>>(d_in, d_out, w, h);
         CHECK_CUDA(cudaDeviceSynchronize());
+
+        // Swap input and output pointers for next iteration
+        // (so the output of this pass becomes the input of the next pass)
         unsigned char* tmp = d_in; d_in = d_out; d_out = tmp;
     }
     CHECK_CUDA(cudaEventRecord(stop));

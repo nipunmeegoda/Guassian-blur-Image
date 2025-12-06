@@ -42,12 +42,14 @@ void gaussianBlurWithScratch(const unsigned char *input, unsigned char *output,
     const int lastY = height - 1;
     const size_t rowStride = (size_t)width;
 
+      // -------- Horizontal pass --------
     #pragma omp parallel for schedule(static)
     for (int y = 0; y < height; y++) {
         const unsigned char *row = input + y * rowStride;
         unsigned short *tmpRow = scratch + y * rowStride;
 
         for (int x = 0; x < width; x++) {
+            // Neighbor indices with clamping at boundaries
             int l = (x == 0) ? 0 : x - 1;
             int r = (x == lastX) ? lastX : x + 1;
             tmpRow[x] =
@@ -56,7 +58,7 @@ void gaussianBlurWithScratch(const unsigned char *input, unsigned char *output,
                 row[r] * GAUSSIAN_WEIGHTS[2];
         }
     }
-
+    // -------- Vertical pass --------
     #pragma omp parallel for schedule(static)
     for (int y = 0; y < height; y++) {
         int t = (y == 0) ? 0 : y - 1;
@@ -78,12 +80,15 @@ void gaussianBlurWithScratch(const unsigned char *input, unsigned char *output,
     }
 }
 
+// apply a single Gaussian blur pass.
 void gaussianBlur(unsigned char *input, unsigned char *output, int width, int height) {
     unsigned short *scratch = malloc((size_t)width * height * sizeof(unsigned short));
     gaussianBlurWithScratch(input, output, width, height, scratch);
     free(scratch);
 }
 
+
+// Apply Gaussian blur multiple times (passes).
 void gaussianBlurMultiple(unsigned char *input, unsigned char *output,
                           int width, int height, int passes)
 {
